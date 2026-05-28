@@ -2,9 +2,9 @@ require('dotenv').config();
 const mongoose = require("mongoose");
 const env = process.env;
 let connection = `${env.DB_CONNECTION}://${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME}`;
-if (env.DB_SRV && env.DB_SRV != '') {
-    connection = env.DB_SRV
-}
+// if (env.DB_SRV && env.DB_SRV != '') {
+//     connection = env.DB_SRV
+// }
 
 console.log(connection)
 mongoose.connect(connection, {
