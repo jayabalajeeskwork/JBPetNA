@@ -12,7 +12,37 @@ class MunicipalityController extends BaseController {
         this._municipalityRepository = MunicipalityRepository;
     }
 
+addMunicipalityAdmin = async (req, res) => {
 
+    try {
+
+        const {
+            email,
+            fullName,
+            municipalities
+        } = req.body;
+
+        const user = await User.create({
+            email,
+            role: roles.MUNICIPALITY_ADMIN
+        });
+
+        await MunicipalityProfile.create({
+            user: user._id,
+            fullName,
+            municipalities
+        });
+
+        return res.json({
+            success: true
+        });
+
+    } catch (e) {
+        return res.status(500).json({
+            message: e.message
+        });
+    }
+}
     getMunicipalities = async (req, res) => {
         const response = new BaseResponse(req, res);
         try {

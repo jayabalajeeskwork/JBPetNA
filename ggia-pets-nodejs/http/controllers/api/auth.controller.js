@@ -106,123 +106,171 @@ class AuthController extends BaseController {
     }
 
     login = async (req, res) => {
-        const response = new AuthResponse(req, res);
-        try {
-            const { email, phone, phoneCode, password } = req.body;
-            let query = {};
-            if (email) {
-                query = { email };
-            } else if (phone && phoneCode) {
-                query = { phone, phoneCode };
-            } else if (phone) {
-                query = { phone };
-            } else {
-                throw new BadRequestError('Email or phone is required');
-            }
 
-            const user = await this._userRepository.findOne(query);
+    const response = new AuthResponse(req, res);
 
-            if (!user) {
-                throw new BadRequestError('Invalid identifier or password');
-            }
+    try {
 
-            // If password is provided, use password login
-            if (password) {
-                const isMatch = await user.comparePassword(password);
-                if (!isMatch) {
-                    throw new BadRequestError('Invalid identifier or password');
-                }
+        const { email, password } = req.body;
 
-                // Ensure user is verified
-                if (!user.isEmailVerified || !user.isPhoneVerified) {
-                    // If not verified, we might want to trigger OTP flow or return specific error
-                    // For now, allow login if they have a password, but standard practice might differ
-                }
+        const user =
+            await this._userRepository.findOne({ email });
 
-                const token = await user.generateToken();
-                return response.okResponse({ user, token });
-            } else {
-                // If password is NOT provided, send OTP
-                const otp = helpers.generateOTP().toString();
-                const otpExpires = Date.now() + 10 * 60 * 1000;
-
-                user.otp = otp;
-                user.otpExpires = otpExpires;
-                user.isOtpVerified = false;
-                await user.save();
-
-                if (user.email) {
-                    await helpers.sendEmailOTP(user.email, otp);
-                }
-
-                if (user.phone) {
-                    const fullPhone = (user.phoneCode || '') + user.phone;
-                    await helpers.sendSMSOTP(fullPhone, otp);
-                }
-                return response.okResponse({ identifier: user.email || user.phone, message: "OTP sent successfully", otp });
-            }
-        } catch (e) {
-            if (e instanceof BadRequestError) {
-                return response.badRequestResponse(e);
-            }
-            return response.internalServerErrorResponse(e);
+        if (!user) {
+            throw new BadRequestError('Invalid credentials');
         }
+
+        if (!user.isActive) {
+            throw new BadRequestError('User disabled');
+        }
+
+        const isMatch =
+            await user.comparePassword(password);
+
+        if (!isMatch) {
+            throw new BadRequestError('Invalid credentials');
+        }
+
+        const token = await user.generateToken();
+
+        return response.okResponse({
+            user,
+            token
+        });
+
+    } catch (e) {
+
+        if (e instanceof BadRequestError) {
+            return response.badRequestResponse(e);
+        }
+
+        return response.internalServerErrorResponse(e);
     }
+}
 
     verifyOtp = async (req, res) => {
-        const response = new AuthResponse(req, res);
-        try {
-            const { email, phone, phoneCode, otp } = req.body;
 
-            let query = {};
-            if (email) {
-                query = { email };
-            } else if (phone && phoneCode) {
-                query = { phone, phoneCode };
-            } else if (phone) {
-                query = { phone };
-            } else {
-                throw new BadRequestError('Email or phone is required');
-            }
+    const response = new AuthResponse(req, res);
 
-            const user = await this._userRepository.findOne(query);
+    try {
 
-            if (!user) {
-                throw new BadRequestError('User not found');
-            }
+        const { email, otp } = req.body;
 
-            if (!user.otp || user.otp !== otp || user.otpExpires < Date.now()) {
-                throw new BadRequestError('Invalid or expired OTP');
-            }
+        const user =
+            await this._userRepository.findOne({ email });
 
-            // Clear OTP
-            user.otp = null;
-            user.otpExpires = null;
-            user.isOtpVerified = true;
-
-            if (email) {
-                user.isEmailVerified = true;
-            } else if (phone) {
-                user.isPhoneVerified = true;
-            }
-
-            await user.save();
-
-            // If both verified, return token
-            if (user.isEmailVerified && user.isPhoneVerified) {
-                const token = await user.generateToken();
-                return response.okResponse({ user, token, message: 'Verification successful' });
-            }
-
-            return response.okResponse({ user, message: 'Verification successful' });
-        } catch (e) {
-            if (e instanceof BadRequestError) {
-                return response.badRequestResponse(e);
-            }
-            return response.internalServerErrorResponse(e);
+        if (!user) {
+            throw new BadRequestError('User not found');
         }
-    }
 
+        if (
+            user.otp !== otp ||
+            user.otpExpires < Date.now()
+        ) {
+            throw new BadRequestError('Invalid OTP');
+        }
+
+        user.isOtpVerified = true;
+        user.isEmailVerified = true;
+        user.otp = null;
+        user.otpExpires = null;
+
+        await user.save();
+
+        return response.okResponse({
+            message: 'OTP verified'
+        });
+
+    } catch (e) {
+
+        if (e instanceof BadRequestError) {
+            return response.badRequestResponse(e);
+        }
+
+        return response.internalServerErrorResponse(e);
+    }
+}
+disableCityAdmin = async (req, res) => {
+
+    try {
+
+        const { userId } = req.body;
+
+        const user =
+            await this._userRepository.findById(userId);
+
+        if (!user) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        user.isActive = false;
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'City admin disabled'
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
+sendResetPasswordOtp = async (req, res) => {
+
+    try {
+
+        const { email } = req.body;
+
+        const user =
+            await this._userRepository.findOne({
+                email
+            });
+
+        if (!user) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        const otp =
+            helpers.generateOTP().toString();
+
+        user.otp = otp;
+
+        user.otpExpires =
+            Date.now() + 10 * 60 * 1000;
+
+        await user.save();
+
+        await helpers.sendEmailOTP(
+            email,
+            otp
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'OTP sent successfully'
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
     resendOtp = async (req, res) => {
         const response = new AuthResponse(req, res);
         try {
@@ -267,7 +315,146 @@ class AuthController extends BaseController {
             return response.internalServerErrorResponse(e);
         }
     }
+sendResetPasswordOtp = async (req, res) => {
 
+    try {
+
+        const { email } = req.body;
+
+        const user =
+            await this._userRepository.findOne({
+                email
+            });
+
+        if (!user) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        const otp =
+            helpers.generateOTP().toString();
+
+        user.otp = otp;
+
+        user.otpExpires =
+            Date.now() + 10 * 60 * 1000;
+
+        await user.save();
+
+        await helpers.sendEmailOTP(
+            email,
+            otp
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'OTP sent successfully'
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
+verifyResetOtp = async (req, res) => {
+
+    try {
+
+        const { email, otp } = req.body;
+
+        const user =
+            await this._userRepository.findOne({
+                email
+            });
+
+        if (!user) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        if (
+            user.otp !== otp ||
+            user.otpExpires < Date.now()
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid OTP'
+            });
+        }
+
+        user.isOtpVerified = true;
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'OTP verified'
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
+resetPassword = async (req, res) => {
+
+    try {
+
+        const { email, password } = req.body;
+
+        const user =
+            await this._userRepository.findOne({
+                email
+            });
+
+        if (!user) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        if (!user.isOtpVerified) {
+
+            return res.status(400).json({
+                success: false,
+                message: 'OTP not verified'
+            });
+        }
+
+        user.password = password;
+
+        user.isOtpVerified = false;
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Password reset successful'
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
     /**
      * Update user profile
      */
@@ -309,6 +496,83 @@ class AuthController extends BaseController {
             return response.internalServerErrorResponse(e);
         }
     }
+
+    sendVerificationEmail = async (req, res) => {
+
+    const response = new AuthResponse(req, res);
+
+    try {
+
+        const { email, role } = req.body;
+
+        const existingUser =
+            await this._userRepository.findOne({ email });
+
+        if (existingUser) {
+            throw new BadRequestError('User already exists');
+        }
+
+        const otp = helpers.generateOTP().toString();
+
+        const user =
+            await this._userRepository.create({
+                email,
+                role,
+                otp,
+                otpExpires: Date.now() + 10 * 60 * 1000
+            });
+
+        await helpers.sendEmailOTP(email, otp);
+
+        return response.okResponse({
+            message: 'Verification email sent'
+        });
+
+    } catch (e) {
+
+        if (e instanceof BadRequestError) {
+            return response.badRequestResponse(e);
+        }
+
+        return response.internalServerErrorResponse(e);
+    }
+}
+setPassword = async (req, res) => {
+
+    const response = new AuthResponse(req, res);
+
+    try {
+
+        const { email, password } = req.body;
+
+        const user =
+            await this._userRepository.findOne({ email });
+
+        if (!user) {
+            throw new BadRequestError('User not found');
+        }
+
+        if (!user.isOtpVerified) {
+            throw new BadRequestError('Verify OTP first');
+        }
+
+        user.password = password;
+
+        await user.save();
+
+        return response.okResponse({
+            message: 'Password set successfully'
+        });
+
+    } catch (e) {
+
+        if (e instanceof BadRequestError) {
+            return response.badRequestResponse(e);
+        }
+
+        return response.internalServerErrorResponse(e);
+    }
+}
 }
 
 module.exports = new AuthController();

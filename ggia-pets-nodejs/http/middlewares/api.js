@@ -15,26 +15,44 @@ const ValidationResponse = require('../responses/validation.response');
 class ApiMiddleware {
 
 	async auth(req, res, next) {
-		const response = new ValidationResponse(req, res);
-		try {
-			const token = req.header("authorization").split(' ')[1];
-			const user = await UserModel.findByToken(token);
-			if (!user) {
-				throw new Error("unauthorized");
-			}
-			// else if (user.status === profileStatus.INACTIVE) {
-			// 	throw new Error("Profile deactivated");
-			// }
-			// else if (!user.isOtpVerified) {
-			// 	throw new Error("User not verified")
-			// }
-			req.user = user;
-			next();
-		} catch (e) {
-			console.log(e, 'IN API auth middleware')
-			return response.middlewareError("Unauthorized")
+
+	const response = new ValidationResponse(req, res);
+
+	try {
+
+		console.log("HEADERS =>", req.headers);
+
+		const authHeader = req.header("authorization");
+
+		console.log("AUTH HEADER =>", authHeader);
+
+		if (!authHeader) {
+			throw new Error("No authorization header");
 		}
+
+		const token = authHeader.split(' ')[1];
+
+		console.log("TOKEN =>", token);
+
+		const user = await UserModel.findByToken(token);
+
+		console.log("USER =>", user);
+
+		if (!user) {
+			throw new Error("Unauthorized");
+		}
+
+		req.user = user;
+
+		next();
+
+	} catch (e) {
+
+		console.log(e, 'IN API auth middleware');
+
+		return response.middlewareError("Unauthorized");
 	}
+}
 
 	async optionalAuth(req, res, next) {
 		try {

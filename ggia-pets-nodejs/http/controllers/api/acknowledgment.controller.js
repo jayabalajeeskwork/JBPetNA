@@ -10,7 +10,9 @@ const BadRequestError = require('../../../exceptions/badRequest.exception');
 const helpers = require('../../../helpers/helpers');
 const crypto = require('crypto');
 const axios = require('axios');
-
+const Acknowledgment = require('../../../models/acknowledgment.model');
+const PetOwner = require('../../../models/pet-owner.model');
+const { Parser } = require('json2csv');
 class AcknowledgmentController extends BaseController {
 
     constructor() {
@@ -21,7 +23,130 @@ class AcknowledgmentController extends BaseController {
         this._licenseRepository = new LicenseRepository();
         this._userRepository = new UserRepository();
     }
+getAllAcknowledgments = async (req, res) => {
 
+    try {
+
+        const filters = {};
+
+        // STATUS FILTER
+        if (req.query.status) {
+            filters.status = req.query.status;
+        }
+
+        // DATE FILTER
+        if (req.query.fromDate && req.query.toDate) {
+
+            filters.createdAt = {
+                $gte: new Date(req.query.fromDate),
+                $lte: new Date(req.query.toDate)
+            };
+        }
+
+        // MUNICIPALITY FILTER
+        if (req.query.municipality) {
+
+            const petOwners = await PetOwner.find({
+                municipality: req.query.municipality
+            }).select('_id');
+
+            filters.owner = {
+                $in: petOwners.map(item => item._id)
+            };
+        }
+
+        // CHANNEL FILTER
+        if (req.query.channel) {
+            filters.sendLinkVia = req.query.channel;
+        }
+
+        const acknowledgments =
+            await Acknowledgment.find(filters)
+
+            .populate({
+                path: 'owner',
+                populate: {
+                    path: 'municipality'
+                }
+            })
+
+            .populate('pet')
+
+            .sort({
+                createdAt: -1
+            });
+
+        return res.status(200).json({
+            success: true,
+            count: acknowledgments.length,
+            data: acknowledgments
+        });
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
+
+exportAcknowledgments = async (req, res) => {
+
+    try {
+
+        const acknowledgments =
+            await Acknowledgment.find()
+
+            .populate('pet')
+            .populate('owner');
+
+        const formattedData = acknowledgments.map(item => {
+
+            return {
+
+                acknowledgmentId: item._id,
+
+                ownerName:
+                    item.owner?.name || '',
+
+                petName:
+                    item.pet?.name || '',
+
+                status:
+                    item.status,
+
+                channel:
+                    item.sendLinkVia,
+
+                createdAt:
+                    item.createdAt
+            };
+        });
+
+        const parser = new Parser();
+
+        const csv = parser.parse(formattedData);
+
+        res.header(
+            'Content-Type',
+            'text/csv'
+        );
+
+        res.attachment(
+            'acknowledgments.csv'
+        );
+
+        return res.send(csv);
+
+    } catch (e) {
+
+        return res.status(500).json({
+            success: false,
+            message: e.message
+        });
+    }
+}
     submit = async (req, res) => {
         const response = new BaseResponse(req, res);
         try {
